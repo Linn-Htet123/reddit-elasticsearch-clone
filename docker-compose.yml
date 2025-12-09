@@ -1,0 +1,19 @@
+name: reddit-elasticsearch-clone
+version: "3"
+services:
+  postgres:
+    image: postgres
+    container_name: "reddit-postgres"
+    environment:
+      POSTGRES_USER: "reddit"
+      POSTGRES_PASSWORD: "reddit"
+      POSTGRES_DB: "reddit"
+    ports:
+      - 5432:5432
+    restart: always
+  redis:
+    image: redis
+    container_name: "reddit-redis"
+    ports:
+      - 6379:6379
+    restart: always
