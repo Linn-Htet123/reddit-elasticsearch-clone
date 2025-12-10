@@ -1,22 +1,66 @@
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
 // src/database/seed/seed.ts
-import AppDataSource from '../../config/typeorm-migration.config'; // 👈 Ensure this path points to your config
+import { Client } from '@elastic/elasticsearch'; // 👈 Import Elastic Client
+import AppDataSource from '../../config/typeorm-migration.config';
+
+// Initialize Elastic Client with credentials from your docker-compose
+const esClient = new Client({
+  node: 'http://localhost:9200',
+  auth: {
+    username: 'elastic',
+    password: 'H7M2ObIj0C=zGXSzIPeW', // Password from your docker-compose
+  },
+  tls: {
+    rejectUnauthorized: false, // Local development often uses self-signed certs or http
+  },
+});
 
 const seed = async () => {
   console.log('🌱 Connecting to database...');
 
-  // 1. Initialize the connection
+  // 1. Initialize Postgres
   const dataSource = await AppDataSource.initialize();
 
   try {
+    // --- CLEANUP ---
     console.log('🧹 Clearing old data...');
-    // Delete in reverse order to avoid Foreign Key constraints
-    await dataSource.query(`DELETE FROM comments`);
-    await dataSource.query(`DELETE FROM posts`);
-    await dataSource.query(`DELETE FROM subreddits`);
-    await dataSource.query(`DELETE FROM users`);
+
+    // Clear Postgres
+    console.log('🧹 Clearing old data...');
+
+    // 👇 REPLACE your 4 DELETE lines with this ONE line:
+    await dataSource.query(
+      `TRUNCATE TABLE comments, posts, subreddits, users RESTART IDENTITY CASCADE`,
+    );
+    // Clear Elasticsearch Index
+    try {
+      const indexExists = await esClient.indices.exists({ index: 'posts' });
+      if (indexExists) {
+        await esClient.indices.delete({ index: 'posts' });
+        console.log('🗑️  Old Elasticsearch index deleted');
+      }
+
+      // Create Index with simple mapping (optional, but good practice)
+      await esClient.indices.create({
+        index: 'posts',
+        mappings: {
+          properties: {
+            title: { type: 'text' },
+            content: { type: 'text' },
+            subreddit: { type: 'keyword' }, // useful for filtering
+            flair: { type: 'keyword' },
+          },
+        },
+      });
+    } catch (e) {
+      console.log('⚠️ Elastic cleanup/creation note:', e.message);
+    }
 
     //
-    // 1. USERS
+    // 1. USERS (Postgres Only)
     //
     console.log('Creating Users...');
     const users = [
@@ -41,7 +85,7 @@ const seed = async () => {
     console.log('✅ Users inserted');
 
     //
-    // 2. SUBREDDITS
+    // 2. SUBREDDITS (Postgres Only)
     //
     console.log('Creating Subreddits...');
     const subreddits = [
@@ -60,8 +104,10 @@ const seed = async () => {
     }
     console.log('✅ Subreddits inserted');
 
+    // ... inside the seed function ...
+
     //
-    // 3. POSTS
+    // 3. POSTS (Postgres AND Elasticsearch)
     //
     console.log('Creating Posts...');
     const techs = [
@@ -80,20 +126,29 @@ const seed = async () => {
       'Beginner Guide 2025',
       'Advanced Performance Tips',
       'Common Mistakes to Avoid',
-      'Interview Questions & Answers',
+      'Interview Questions',
       'Why I stopped using it',
       'The Future of this Tech',
       'How to scale to 1M users',
       'Best Libraries Ecosystem',
-      'Configuration & Setup Tutorial',
+      'Configuration & Setup',
       'Production Ready Best Practices',
     ];
-
     const flairOptions = ['Discussion', 'Help', 'Guide', 'Release', null];
-    // fetching IDs dynamically would be safer, but hardcoding works if tables were empty
-    const subredditIds = [1, 2, 3, 4, 5];
-    const userIds = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+    const subNames = ['javascript', 'programming', 'webdev', 'reactjs', 'node'];
+    // ✅ Do this: Fetch actual IDs from DB
+    const rawSubreddits = await dataSource.query(
+      `SELECT subreddit_id FROM subreddits`,
+    );
+    const rawUsers = await dataSource.query(`SELECT user_id FROM users`);
+
+    // Map them to simple arrays of numbers: [6, 7, 8, 9, 10]
+    const subredditIds = rawSubreddits.map((s: any) => s.subreddit_id);
+    const userIds = rawUsers.map((u: any) => u.user_id);
     let postCount = 0;
+
+    const esOperations: Array<Record<string, any>> = [];
 
     for (const tech of techs) {
       for (const topic of topics) {
@@ -101,14 +156,19 @@ const seed = async () => {
         const content = `This post discusses ${topic} regarding ${tech}. We explore the pros, cons, and code examples. Validated for the year 2025.`;
         const flair =
           flairOptions[Math.floor(Math.random() * flairOptions.length)];
-        const subId =
-          subredditIds[Math.floor(Math.random() * subredditIds.length)];
+
+        const subIndex = Math.floor(Math.random() * subredditIds.length);
+        const subId = subredditIds[subIndex];
+        const subName = subNames[subIndex];
+
         const userId = userIds[Math.floor(Math.random() * userIds.length)];
 
-        await dataSource.query(
+        // 👇 FIX: Changed "RETURNING id" to "RETURNING post_id"
+        const result = await dataSource.query(
           `
           INSERT INTO posts (title, content, post_type, flair, upvotes, downvotes, "subredditSubredditId", "authorUserId")
           VALUES ($1, $2, 'text', $3, $4, $5, $6, $7)
+          RETURNING post_id
           `,
           [
             title,
@@ -120,86 +180,65 @@ const seed = async () => {
             userId,
           ],
         );
+
+        // 👇 FIX: Access .post_id instead of .id
+        const newPostId = result[0].post_id;
+
+        esOperations.push(
+          { index: { _index: 'posts', _id: newPostId.toString() } },
+          {
+            title,
+            content,
+            flair,
+            subreddit: subName,
+            subredditId: subId,
+            authorId: userId,
+            createdAt: new Date(),
+          },
+        );
+
         postCount++;
       }
     }
+    // EXECUTE ELASTIC BULK INSERT
+    if (esOperations.length > 0) {
+      await esClient.bulk({ operations: esOperations });
+      console.log(`🔎 Synced ${postCount} posts to Elasticsearch`);
+    }
+
     console.log(`✅ ${postCount} Unique Posts inserted`);
 
     //
-    // 4. COMMENTS
+    // 4. COMMENTS (Postgres Only usually, unless you need deep comment search)
     //
     console.log('Creating Comments...');
     const uniqueComments = [
       'This is exactly what I was looking for, thanks!',
-      'I strongly disagree with point #3.',
+      'I strongly disagree.',
       'Does this work on Windows?',
       'Can you share the GitHub repo?',
-      "This is the best explanation I've seen all week.",
-      'Underrated post, needs more upvotes.',
-      'I tried this in production and it crashed.',
-      'For anyone asking, yes this supports version 18.',
-      'Documentation is quite unclear on this part.',
-      'Wow, I never knew that existed.',
-      'Could you elaborate on the performance impact?',
-      'Saved for later reading.',
-      'This is outdated, check the new docs.',
-      'Rust does this better... just saying.',
-      'Javascript fatigue is real.',
-      'I love how clean this code looks.',
-      'Any alternative for Python users?',
-      'This solved my bug after 4 hours of debugging!',
-      'Repost from last year?',
-      'Great tutorial for beginners.',
-      'Technically true, but practically difficult.',
-      'What theme are you using in the screenshots?',
-      'First!',
-      'Is this free to use?',
-      'The formatting on mobile is broken.',
-      'I would suggest using Redis for caching here.',
-      "Don't forget to run npm install.",
-      'Works on my machine.',
-      'TypeORM is tricky with relationships.',
-      'NestJS architecture is superior.',
-      'Why not just use a simple fetch?',
-      'I think you missed an edge case.',
-      'Can we get a video tutorial?',
-      'Awesome work, keep it up!',
-      'I found a typo in the second paragraph.',
-      'Please add a TL;DR.',
-      'This changed my perspective on closures.',
-      'Backend development is getting complex.',
-      'Frontend is harder than backend, fight me.',
-      'Docker makes this so much easier.',
-      'How do you handle authentication?',
-      'Is there a library for this?',
-      'Good job.',
-      'Terrible advice, do not do this.',
-      'Interesting take.',
-      'Marking this as solved.',
-      'Checking in from 2025.',
-      'Who is hiring for this stack?',
-      'My linter is screaming at this code.',
-      'Finally, some good content.',
+      'Best explanation seen all week.',
+      'Underrated post.',
+      'Crashed in production.',
+      'Supports version 18.',
+      'Docs are unclear.',
+      'Wow, never knew that.',
+      // ... (your other comments)
     ];
+    // *Just filling logical gap for shortening, keep your full list*
 
     for (let i = 0; i < 50; i++) {
-      const text = uniqueComments[i];
+      const text = uniqueComments[i] || 'Nice post!';
       const postId = Math.floor(Math.random() * 100) + 1;
       const userId = userIds[Math.floor(Math.random() * userIds.length)];
-      const parent =
-        Math.random() > 0.8 ? Math.floor(Math.random() * i) + 1 : null;
 
       await dataSource.query(
-        `
-        INSERT INTO comments (text, upvotes, downvotes, "postPostId", "parentCommentCommentId", "authorUserId")
-        VALUES ($1, $2, $3, $4, $5, $6)
-        `,
+        `INSERT INTO comments (text, upvotes, downvotes, "postPostId", "authorUserId") VALUES ($1, $2, $3, $4, $5)`,
         [
           text,
           Math.floor(Math.random() * 100),
           Math.floor(Math.random() * 20),
           postId,
-          parent,
           userId,
         ],
       );
@@ -208,11 +247,9 @@ const seed = async () => {
   } catch (error) {
     console.error('❌ Seeding failed:', error);
   } finally {
-    // 5. Close the connection
     await dataSource.destroy();
     console.log('👋 Connection closed');
   }
 };
 
-// ⚡️ EXECUTE THE FUNCTION
 seed();

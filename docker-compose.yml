@@ -1,5 +1,6 @@
 name: reddit-elasticsearch-clone
-version: "3"
+version: "3.8"
+
 services:
   postgres:
     image: postgres
@@ -11,9 +12,55 @@ services:
     ports:
       - 5432:5432
     restart: always
+    networks:
+      - reddit-net
+
   redis:
     image: redis
     container_name: "reddit-redis"
     ports:
       - 6379:6379
     restart: always
+    networks:
+      - reddit-net
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.2.2
+    container_name: "es01"
+    environment:
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - xpack.security.enabled=true
+      - ELASTIC_PASSWORD=H7M2ObIj0C=zGXSzIPeW
+    ports:
+      - 9200:9200
+      - 9300:9300
+    mem_limit: 1g
+    restart: always
+    networks:
+      - reddit-net
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:9.2.2
+    container_name: "kib01"
+    ports:
+      - 5601:5601
+    restart: always
+    networks:
+      - reddit-net
+    depends_on:
+      - elasticsearch
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - ELASTICSEARCH_USERNAME=kibana_system
+      - ELASTICSEARCH_PASSWORD=rRiTS1xlgRmKAF8_tbZl
+
+networks:
+  reddit-net:
+    driver: bridge
+
+volumes:
+  esdata:
+    driver: local
