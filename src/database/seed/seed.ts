@@ -50,7 +50,7 @@ const seed = async () => {
           properties: {
             title: { type: 'text' },
             content: { type: 'text' },
-            subreddit: { type: 'keyword' }, // useful for filtering
+            subreddit: { type: 'keyword' },
             flair: { type: 'keyword' },
           },
         },
@@ -137,7 +137,6 @@ const seed = async () => {
     const flairOptions = ['Discussion', 'Help', 'Guide', 'Release', null];
 
     const subNames = ['javascript', 'programming', 'webdev', 'reactjs', 'node'];
-    // ✅ Do this: Fetch actual IDs from DB
     const rawSubreddits = await dataSource.query(
       `SELECT subreddit_id FROM subreddits`,
     );

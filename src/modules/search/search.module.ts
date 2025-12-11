@@ -4,6 +4,7 @@ import { SearchController } from './search.controller';
 import { ElasticsearchModule } from '@nestjs/elasticsearch';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { SearchResponseFactory } from './search-response.factory';
 
 @Module({
   imports: [
@@ -20,7 +21,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
       }),
     }),
   ],
-  providers: [SearchService],
+  providers: [SearchService, SearchResponseFactory],
   controllers: [SearchController],
 })
 export class SearchModule {}
