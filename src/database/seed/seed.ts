@@ -44,12 +44,47 @@ const seed = async () => {
       }
 
       // Create Index with simple mapping (optional, but good practice)
+      // In your seed script or index creation
       await esClient.indices.create({
         index: 'posts',
+        settings: {
+          analysis: {
+            analyzer: {
+              ngram_analyzer: {
+                type: 'custom',
+                tokenizer: 'ngram_tokenizer',
+                filter: ['lowercase'],
+              },
+            },
+            tokenizer: {
+              ngram_tokenizer: {
+                type: 'ngram',
+                min_gram: 3,
+                max_gram: 20,
+                token_chars: ['letter', 'digit'],
+              },
+            },
+          },
+        },
         mappings: {
           properties: {
-            title: { type: 'text' },
-            content: { type: 'text' },
+            title: {
+              type: 'text',
+              analyzer: 'standard',
+              fields: {
+                ngram: {
+                  type: 'text',
+                  analyzer: 'ngram_analyzer',
+                },
+                keyword: {
+                  type: 'keyword',
+                },
+              },
+            },
+            content: {
+              type: 'text',
+              analyzer: 'standard',
+            },
             subreddit: { type: 'keyword' },
             flair: { type: 'keyword' },
           },

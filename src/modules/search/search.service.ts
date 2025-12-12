@@ -1,10 +1,17 @@
 import { Injectable } from '@nestjs/common';
 import { ElasticsearchService } from '@nestjs/elasticsearch';
-import { SearchPostDto } from './search-result.interface';
+import type { QueryDslQueryContainer } from 'node_modules/@elastic/elasticsearch/lib/api/types';
+import { SearchResponseFactory } from './search-response.factory';
 import {
+  PaginatedSearchResult,
   SearchHitSource,
-  SearchResponseFactory,
-} from './search-response.factory';
+} from './search-result.interface';
+
+export interface SearchOptions {
+  query: string;
+  page?: number;
+  limit?: number;
+}
 
 @Injectable()
 export class SearchService {
@@ -13,117 +20,155 @@ export class SearchService {
     private readonly searchResponseFactory: SearchResponseFactory,
   ) {}
 
-  // async search(text: string): Promise<SearchPostDto[]> {
-  //   if (!text) return [];
+  async searchWithPagination(
+    options: SearchOptions,
+  ): Promise<PaginatedSearchResult> {
+    const { query, page = 1, limit = 25 } = options;
 
-  //   const response = await this.elasticsearchService.search({
-  //     index: 'posts',
-  //     query: {
-  //       multi_match: {
-  //         query: text,
-  //         fields: ['title', 'content'],
-  //       },
-  //     },
-  //   });
+    const validatedPage = Math.max(1, page);
+    const validatedLimit = Math.min(Math.max(1, limit), 100);
+    const from = (validatedPage - 1) * validatedLimit;
 
-  //   return response.hits.hits.map((hit: SearchHit<SearchHitSource>) =>
-  //     this.searchResponseFactory.toDto(hit),
-  //   );
-  // }
-  // search.service.ts
-  async search(text: string): Promise<SearchPostDto[]> {
-    if (!text) return [];
+    const must: QueryDslQueryContainer[] = [];
 
-    const response = await this.elasticsearchService.search<SearchHitSource>({
-      index: 'posts',
-      query: {
+    if (query && query.trim()) {
+      must.push({
         bool: {
           should: [
-            // Exact phrase match in title (highest priority)
+            {
+              match: {
+                'title.ngram': {
+                  query: query.toLowerCase(),
+                  boost: 15,
+                },
+              },
+            },
             {
               match_phrase: {
                 title: {
-                  query: text,
+                  query: query,
                   boost: 10,
                 },
               },
             },
-            // Exact phrase match in content
-            {
-              match_phrase: {
-                content: {
-                  query: text,
-                  boost: 5,
-                },
-              },
-            },
-            // Title word matching with AND operator (prefer all words present)
             {
               match: {
                 title: {
-                  query: text,
+                  query: query,
                   boost: 8,
                   operator: 'and',
                   fuzziness: 'AUTO',
                 },
               },
             },
-            // Title word matching with OR operator (fallback)
             {
               match: {
                 title: {
-                  query: text,
+                  query: query,
                   boost: 4,
                   operator: 'or',
                   fuzziness: 'AUTO',
                 },
               },
             },
-            // Content word matching with AND operator
             {
               match: {
                 content: {
-                  query: text,
+                  query: query,
                   boost: 3,
                   operator: 'and',
                   fuzziness: 'AUTO',
                 },
               },
             },
-            // Content word matching with OR operator
-            {
-              match: {
-                content: {
-                  query: text,
-                  boost: 1,
-                  operator: 'or',
-                  fuzziness: 'AUTO',
-                },
-              },
-            },
-            // Prefix matching for autocomplete
             {
               multi_match: {
-                query: text,
+                query: query,
                 fields: ['title^3', 'content'],
                 type: 'phrase_prefix',
                 boost: 2,
               },
             },
           ],
-          // Require at least one match
           minimum_should_match: 1,
         },
+      });
+    } else {
+      must.push({ match_all: {} });
+    }
+
+    const response = await this.elasticsearchService.search<SearchHitSource>({
+      index: 'posts',
+      from: from,
+      size: validatedLimit,
+      _source: ['id', 'title', 'subreddit', 'createdAt', 'authorId'],
+      query: {
+        bool: {
+          must,
+        },
       },
-      // Sort by relevance score (best matches first)
-      sort: ['_score'],
-      size: 50,
-      // Only return results with minimum score to filter weak matches
-      min_score: 0.1,
+      highlight: {
+        pre_tags: [
+          '<mark class="bg-yellow-500/30 text-foreground rounded-sm px-1 py-0.5 font-medium">',
+        ],
+        post_tags: ['</mark>'],
+        fields: {
+          title: {},
+
+          content: {
+            fragment_size: 150,
+            number_of_fragments: 1,
+          },
+        },
+      },
+      min_score: query ? 0.1 : undefined,
     });
 
-    return response.hits.hits.map((hit) =>
+    const total =
+      typeof response.hits.total === 'number'
+        ? response.hits.total
+        : (response.hits.total?.value ?? 0);
+
+    const totalPages = Math.ceil(total / validatedLimit);
+    const hasMore = validatedPage < totalPages;
+
+    const posts = response.hits.hits.map((hit) =>
       this.searchResponseFactory.toDto(hit),
     );
+
+    return {
+      posts,
+      total,
+      page: validatedPage,
+      limit: validatedLimit,
+      totalPages,
+      hasMore,
+    };
+  }
+
+  async suggest(query: string): Promise<any> {
+    if (!query || !query.trim()) {
+      return [];
+    }
+
+    const response = await this.elasticsearchService.search<SearchHitSource>({
+      index: 'posts',
+      size: 10,
+      track_total_hits: false,
+      _source: ['title', 'subreddit', 'id'],
+      query: {
+        multi_match: {
+          query: query,
+          fields: ['title.ngram^5', 'subreddit^4'],
+        },
+      },
+    });
+
+    const suggestions = this.searchResponseFactory.toGroupedSuggestions(
+      response.hits.hits,
+      query,
+    );
+
+    return suggestions;
   }
 }
