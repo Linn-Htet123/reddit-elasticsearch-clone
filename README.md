@@ -26,3 +26,5 @@ npm install
 # Run development server
 npm run start:dev
 ```
+
+![API docs Screenshot](assets/api-docs.png)
