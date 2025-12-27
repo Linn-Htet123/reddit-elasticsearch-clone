@@ -1,8 +1,8 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Param, Query } from '@nestjs/common';
 import { SearchService, SearchOptions } from './search.service';
 import { PaginatedSearchResult } from './search-result.interface';
 
-@Controller('')
+@Controller('search')
 export class SearchController {
   constructor(private readonly searchService: SearchService) {}
 
@@ -19,6 +19,22 @@ export class SearchController {
     };
 
     return await this.searchService.searchWithPagination(options);
+  }
+  @Get('r/:subreddit')
+  async searchBySubReddit(
+    @Param('subreddit') subreddit: string,
+    @Query('q') query?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ): Promise<PaginatedSearchResult> {
+    const options: SearchOptions = {
+      subreddit: subreddit || '',
+      query: query || '',
+      page: page ? parseInt(page, 10) : 1,
+      limit: limit ? parseInt(limit, 10) : 25,
+    };
+
+    return await this.searchService.searchWithSubRedditPagination(options);
   }
 
   @Get('suggestions')

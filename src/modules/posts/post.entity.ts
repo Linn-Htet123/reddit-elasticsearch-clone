@@ -16,7 +16,6 @@ export class Post {
   @PrimaryGeneratedColumn('increment')
   post_id: number;
 
-  // Foreign Keys
   @ManyToOne(() => Subreddit, (subreddit) => subreddit.posts, {
     onDelete: 'CASCADE',
   })
@@ -25,7 +24,6 @@ export class Post {
   @ManyToOne(() => User, (user) => user.posts, { onDelete: 'CASCADE' })
   author: User;
 
-  // Content
   @Column({ length: 300 })
   title: string;
 
@@ -47,7 +45,6 @@ export class Post {
   @Column({ default: false })
   is_spoiler: boolean;
 
-  // Engagement
   @Column({ default: 0 })
   upvotes: number;
 
@@ -64,14 +61,12 @@ export class Post {
   @Column({ default: 0 })
   comment_count: number;
 
-  // Timestamps
   @CreateDateColumn()
   created_at: Date;
 
   @UpdateDateColumn()
   updated_at: Date;
 
-  // Full-text search vector
   @Column({
     type: 'tsvector',
     generatedType: 'STORED',
@@ -83,7 +78,6 @@ export class Post {
   })
   search_vector: string;
 
-  // Relations
   @OneToMany(() => Comment, (comment) => comment.post)
   comments: Comment[];
 }

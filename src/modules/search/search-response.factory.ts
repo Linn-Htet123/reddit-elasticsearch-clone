@@ -24,6 +24,14 @@ export class SearchResponseFactory {
       title: title,
       excerpt: excerpt,
       subreddit: source.subreddit || '',
+      flair: source.flair || null,
+      authorId: source.authorId,
+      authorUsername: source.authorUsername || 'unknown',
+      subredditId: source.subredditId || 0,
+      createdAt: source.createdAt,
+      upvotes: source.upvotes || 0,
+      downvotes: source.downvotes || 0,
+      commentCount: source.commentCount || 0,
     };
   }
 
